@@ -1,0 +1,11 @@
+[project]
+name = "job-pipeline-claude"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "google-api-python-client>=2.202.0",
+    "google-auth>=2.62.2",
+    "google-auth-oauthlib>=1.5.0",
+    "requests>=2.34.2",
+]

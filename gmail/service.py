@@ -1,5 +1,6 @@
 import base64
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -19,25 +20,49 @@ def _decode_body(data: str) -> str:
     return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
 
 
-def _extract_body(part):
-    """Recursively extracts text/plain first, then falls back to text/html."""
-    mime_type = part.get("mimeType", "")
+def _walk(part, plain, html):
+    """Collect every text/plain and text/html part, however deeply nested."""
+    mime = part.get("mimeType", "")
     data = part.get("body", {}).get("data")
-
-    if mime_type == "text/plain" and data:
-        return _decode_body(data)
-
-    if mime_type == "text/html" and data:
-        soup = BeautifulSoup(_decode_body(data), "html.parser")
-        return soup.get_text(separator="\n", strip=True)
-
-    # Handle nested multipart emails
+    if data:
+        if mime == "text/plain":
+            plain.append(_decode_body(data))
+        elif mime == "text/html":
+            html.append(_decode_body(data))
     for child in part.get("parts", []):
-        text = _extract_body(child)
-        if text:
-            return text
+        _walk(child, plain, html)
 
-    return ""
+
+def _html_to_text(html: str):
+    """HTML -> readable text, keeping image alt text and link targets
+    (marketing-style emails often hide the company/role there)."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "head"]):
+        tag.decompose()
+    for img in soup.find_all("img"):
+        alt = (img.get("alt") or "").strip()
+        img.replace_with(f" {alt} " if alt else " ")
+    links = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if href.startswith("http"):
+            links.append(href.split("?")[0][:200])   # drop tracking query strings
+    text = soup.get_text(separator="\n", strip=True)
+    return re.sub(r"\n{3,}", "\n\n", text), links
+
+
+def _extract_body(payload):
+    """Return (body_text, links). Uses the HTML version when the plain-text
+    part is missing or just a short stub ("view this email in your browser")."""
+    plain, html = [], []
+    _walk(payload, plain, html)
+    plain_text = "\n".join(plain).strip()
+    html_text, links = ("", [])
+    if html:
+        html_text, links = _html_to_text("\n".join(html))
+    body = html_text if len(html_text) > len(plain_text) * 1.3 else plain_text
+    unique_links = list(dict.fromkeys(links))[:15]
+    return (body or plain_text or html_text), unique_links
 
 
 def get_email_details(service, msg_id):
@@ -49,6 +74,8 @@ def get_email_details(service, msg_id):
     payload = message.get("payload", {})
     headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
 
+    body, links = _extract_body(payload)
+
     return {
         "message_id": message.get("id"),
         "thread_id": message.get("threadId"),
@@ -56,7 +83,8 @@ def get_email_details(service, msg_id):
         "recipient": headers.get("to", ""),
         "subject": headers.get("subject", ""),
         "date": headers.get("date", ""),
-        "body": _extract_body(payload),
+        "body": body,
+        "links": links,
         "snippet": message.get("snippet", ""),
         "labels": message.get("labelIds", []),
         "internal_date": message.get("internalDate"),

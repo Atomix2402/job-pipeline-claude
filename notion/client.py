@@ -117,6 +117,7 @@ def _parse_page(page: dict) -> dict:
         "apply_link": pr.get("Apply Link", {}).get("url"),
         "status": (pr.get("Status", {}).get("status") or {}).get("name"),
         "last_email_event": _plain(pr.get("Last Email Event", {}), "rich_text"),
+        "needs_review": pr.get("Needs Review", {}).get("checkbox", False),
     }
 
 
@@ -138,10 +139,36 @@ def query_jobs(statuses=None) -> list[dict]:
 
 
 # ---------- write ----------
+MANUAL = "Manual application"
+
+
 def update_job(page_id: str, updates: dict):
-    """Update an existing job (status, last_email_event, needs_review...).
-    Deliberately no create function: email-driven runs must never add jobs."""
+    """Update an existing job (status, last_email_event, needs_review...)."""
     props = build_properties(updates)
     if not props:
         return None
     return _request("PATCH", f"{API}/pages/{page_id}", json={"properties": props})
+
+
+def find_job_by_id(job_id: str):
+    """Return the page id of the job with this Job ID, or None."""
+    data = _request("POST", f"{API}/databases/{_db_id()}/query", json={
+        "filter": {"property": "Job ID", "rich_text": {"equals": job_id}}, "page_size": 1})
+    return data["results"][0]["id"] if data["results"] else None
+
+
+def create_manual_job(job: dict):
+    """Add a job the user applied to manually (found via a confirmation email).
+    Text columns we cannot know say 'Manual application'; Needs Review is ticked.
+    Skips (returns None) if this Job ID already exists."""
+    if job.get("job_id") and find_job_by_id(job["job_id"]):
+        return None
+    filled = {
+        "location": MANUAL, "salary": MANUAL, "key_matching_skills": MANUAL,
+        "why_strong_fit": MANUAL, "work_type": "Unspecified", "source": "Other",
+        "status": "Applied", "needs_review": True,
+        **{k: v for k, v in job.items() if v},   # real values override the placeholders
+    }
+    page = _request("POST", f"{API}/pages", json={
+        "parent": {"database_id": _db_id()}, "properties": build_properties(filled)})
+    return page["id"]

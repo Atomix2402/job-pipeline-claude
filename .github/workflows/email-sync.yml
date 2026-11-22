@@ -10,6 +10,10 @@ on:
         description: "Dry run (reads emails and calls the LLM, writes nothing to Notion)"
         type: boolean
         default: true
+      lookback_hours:
+        description: "How many hours of email to scan (scheduled runs always use 24)"
+        type: string
+        default: "24"
 
 # never let two runs overlap
 concurrency:
@@ -53,6 +57,6 @@ jobs:
           # Leave the variables unset to use the defaults in llm/provider.py.
           GROQ_MODELS: ${{ vars.GROQ_MODELS }}
           OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
-          LOOKBACK_HOURS: "24"
+          LOOKBACK_HOURS: ${{ inputs.lookback_hours || '24' }}
           DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
         run: uv run main.py

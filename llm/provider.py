@@ -122,7 +122,7 @@ def _models(provider) -> list[str]:
     cfg = PROVIDERS[provider]
     if not os.getenv(cfg["key_env"]):
         return []
-    raw = os.getenv(cfg["models_env"], cfg["default_models"])
+    raw = os.getenv(cfg["models_env"]) or cfg["default_models"]   # empty = unset
     return [m.strip() for m in raw.split(",") if m.strip()]
 
 

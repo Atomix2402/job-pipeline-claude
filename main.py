@@ -81,7 +81,7 @@ def main() -> None:
             continue   # not marked processed -> retried next run
 
         action = decision["action"]
-        if DRY_RUN or os.getenv("VERBOSE") == "1":   # local debugging only, never in CI
+        if (DRY_RUN or os.getenv("VERBOSE") == "1") and not os.getenv("GITHUB_ACTIONS"):  # local only
             print(f"  {domain(email['sender'])} | {email['subject'][:60]} -> "
                   f"{action}: {decision.get('reason', '')[:80]}")
         try:

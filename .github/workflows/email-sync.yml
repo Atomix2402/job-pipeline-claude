@@ -1,0 +1,58 @@
+name: Email sync
+
+on:
+  schedule:
+    # Every 8 hours (UTC): 00:30, 08:30, 16:30 = 06:00, 14:00, 22:00 IST
+    - cron: "30 0,8,16 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (reads emails and calls the LLM, writes nothing to Notion)"
+        type: boolean
+        default: true
+
+# never let two runs overlap
+concurrency:
+  group: email-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync
+
+      # Remember which Gmail messages were already processed.
+      # Unique key per run + restore-keys = always restores the newest saved copy.
+      - name: Restore processed-email list
+        uses: actions/cache@v4
+        with:
+          path: state/processed.json
+          key: processed-${{ github.run_id }}
+          restore-keys: processed-
+
+      - name: Run email sync
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Optional model overrides: Settings > Secrets and variables > Actions > Variables.
+          # Leave the variables unset to use the defaults in llm/provider.py.
+          GROQ_MODELS: ${{ vars.GROQ_MODELS }}
+          OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
+          LOOKBACK_HOURS: "24"
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
+        run: uv run main.py
